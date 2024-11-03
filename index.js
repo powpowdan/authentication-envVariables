@@ -5,7 +5,7 @@ import bcrypt from "bcrypt";
 import passport from "passport";
 import { Strategy } from "passport-local";
 import session from "express-session";
-import env from "dotenv";
+import env from "dotenv"; 
 
 const app = express();
 const port = 3000;
@@ -14,7 +14,7 @@ env.config();
 
 app.use(
   session({
-    secret: "TOPSECRETWORD",
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
   })
@@ -24,14 +24,14 @@ app.use(express.static("public"));
 
 app.use(passport.initialize());
 app.use(passport.session());
-
+ 
 const db = new pg.Client({
-  user: "postgres",
-  host: "localhost",
-  database: "secrets",
-  password: "123456",
-  port: 5432,
-});
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+}); 
 db.connect();
 
 app.get("/", (req, res) => {
@@ -77,26 +77,28 @@ app.post("/register", async (req, res) => {
   const password = req.body.password;
 
   try {
-    const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [
+    const checkResult = await db.query("SELECT * FROM users WHERE username = $1", [
       email,
     ]);
 
     if (checkResult.rows.length > 0) {
-      req.redirect("/login");
+      res.send("Email already exists. Try logging in.");
     } else {
+      //hashing the password and saving it in the database
       bcrypt.hash(password, saltRounds, async (err, hash) => {
         if (err) {
           console.error("Error hashing password:", err);
         } else {
-          const result = await db.query(
-            "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
+          console.log("Hashed Password:", hash);
+        const result = await db.query(
+            "INSERT INTO users (username, password) VALUES ($1, $2) RETURNING *",
             [email, hash]
           );
           const user = result.rows[0];
           req.login(user, (err) => {
-            console.log("success");
+            console.log(err);
             res.redirect("/secrets");
-          });
+          })
         }
       });
     }
@@ -108,23 +110,19 @@ app.post("/register", async (req, res) => {
 passport.use(
   new Strategy(async function verify(username, password, cb) {
     try {
-      const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
+      const result = await db.query("SELECT * FROM users WHERE username = $1", [
         username,
       ]);
       if (result.rows.length > 0) {
         const user = result.rows[0];
         const storedHashedPassword = user.password;
-        bcrypt.compare(password, storedHashedPassword, (err, valid) => {
+        bcrypt.compare(password, storedHashedPassword, (err, result) => {
           if (err) {
-            //Error with password check
-            console.error("Error comparing passwords:", err);
-            return cb(err);
+            return cb(err)
           } else {
-            if (valid) {
-              //Passed password check
+            if (result) {
               return cb(null, user);
             } else {
-              //Did not pass password check
               return cb(null, false);
             }
           }
@@ -133,10 +131,9 @@ passport.use(
         return cb("User not found");
       }
     } catch (err) {
-      console.log(err);
+      return cb(err);
     }
-  })
-);
+  }));
 
 passport.serializeUser((user, cb) => {
   cb(null, user);
